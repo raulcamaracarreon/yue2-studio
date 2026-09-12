@@ -1,5 +1,17 @@
 # Historial de cambios
 
+## 4.0.0 — Score Workspace y Piano Roll
+
+- `Edit Score` incorpora un Score Workspace con tres representaciones sincronizadas: Partitura, Piano Roll y ABC.
+- Piano Roll editable para las voces Vocal e Ins.
+- Movimiento de notas en tiempo y altura, cambio de duración, creación y eliminación de notas.
+- Selección múltiple, cuantización 1/4, 1/8 y 1/16, zoom horizontal y deshacer/rehacer.
+- Preescucha mediante Web Audio con reproducción, parada, volumen, selección Vocal/Ins/Ambas y playhead.
+- La audición funciona sobre el estado editado antes de regenerar con YuE2.
+- `Aplicar al ABC` reconstruye y valida el score antes de actualizar Partitura y ABC.
+- La escritura de alteraciones respeta la armadura y el estado local del compás.
+- `Edit Score` permite cargar directamente un archivo `score.abc`, además de generaciones de la biblioteca.
+- El Piano Roll se concentra deliberadamente en `Edit Score`; Transcribe conserva su piano preview y las demás áreas mantienen sus visores especializados.
 ## 3.3.4 — control musical simbólico verificado y paquete de publicación
 
 - `Create` obtiene primero el plan ABC antes de generar audio con `cot="full"` y `cot="melody"`.
