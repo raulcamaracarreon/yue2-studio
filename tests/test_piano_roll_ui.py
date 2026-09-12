@@ -35,9 +35,24 @@ def test_editor_renders_both_tracks_and_apply_bridge():
     assert "test-workspace" in html
 
 
+def test_editor_includes_web_audio_preview_and_playhead():
+    html = _iframe_html(build_piano_roll_editor(ABC, "audio", interactive=True))
+    assert "▶ Reproducir" in html
+    assert "■ Detener" in html
+    assert 'id="listen"' in html
+    assert 'id="volume"' in html
+    assert "AudioContext" in html
+    assert "frequencyForMidi" in html
+    assert "async function playScore()" in html
+    assert "audition(clickedNote.pitch, track)" in html
+    assert "playheadEl" in html
+
+
 def test_read_only_editor_hides_apply_action():
     html = _iframe_html(build_piano_roll_editor(ABC, "readonly", interactive=False))
     assert "const INTERACTIVE = false" in html
+    assert 'applyEl.style.display = "none"' in html
+    assert "▶ Reproducir" in html
 
 
 def test_empty_score_returns_placeholder():
