@@ -15,6 +15,7 @@ from . import abc_tools
 
 PPQ = 256
 VOICES = abc_tools.VOICES
+_ACCIDENTAL_TEXT = {-2: "__", -1: "_", 0: "=", 1: "^", 2: "^^"}
 
 
 def _ticks(value: Fraction) -> int:
@@ -138,14 +139,77 @@ def _integer(value, label: str, minimum: int, maximum: int) -> int:
     return value
 
 
-def _pitch_text(pitch: int) -> str:
-    # Alteraciones explícitas: la altura sonora no depende de la armadura.
-    names = ["=C", "^C", "=D", "^D", "=E", "=F", "^F", "=G", "^G", "=A", "^A", "=B"]
-    text = names[pitch % 12]
-    octave = pitch // 12 - 1
+def _preferred_spelling(pitch: int, key: str) -> tuple[str, int]:
+    """Elige letra + alteración respetando primero la armadura de la tonalidad.
+
+    Las notas diatónicas se escriben exactamente como las define K:, por lo que
+    no necesitan becuadros/sostenidos/bemoles redundantes. Para notas cromáticas
+    se prefieren alteraciones simples, naturales cuando son razonables y la
+    dirección de la armadura como desempate.
+    """
+    pitch_class = pitch % 12
+    signature = abc_tools._key_accidentals(key)
+
+    # Si la altura pertenece a la escala escrita por la armadura, conservar esa
+    # ortografía. Esto cubre correctamente casos extremos como E# en F# mayor,
+    # B# en C# mayor, Fb en Cb mayor, etc.
+    for letter in "CDEFGAB":
+        alteration = signature[letter]
+        if (abc_tools.NATURAL[letter] + alteration) % 12 == pitch_class:
+            return letter, alteration
+
+    direction = abc_tools.KEY_SIG[key]
+    candidates = []
+    for letter in "CDEFGAB":
+        natural = abc_tools.NATURAL[letter]
+        for alteration in range(-2, 3):
+            if (natural + alteration) % 12 != pitch_class:
+                continue
+            double_penalty = 100 if abs(alteration) == 2 else 0
+            signature_distance = abs(alteration - signature[letter]) * 10
+            accidental_penalty = abs(alteration) * 2
+            direction_penalty = 0
+            if direction < 0 and alteration > 0:
+                direction_penalty = 3
+            elif direction > 0 and alteration < 0:
+                direction_penalty = 3
+            candidates.append(
+                (
+                    double_penalty + signature_distance + accidental_penalty + direction_penalty,
+                    abs(alteration),
+                    "CDEFGAB".index(letter),
+                    letter,
+                    alteration,
+                )
+            )
+
+    if not candidates:
+        raise abc_tools.AbcError(f"No fue posible nombrar la altura MIDI {pitch} en {key}.")
+    _, _, _, letter, alteration = min(candidates)
+    return letter, alteration
+
+
+def _written_note(letter: str, pitch: int, alteration: int) -> str:
+    """Devuelve la letra ABC con su octava, pero sin símbolo accidental."""
+    numerator = pitch - abc_tools.NATURAL[letter] - alteration
+    if numerator % 12:
+        raise abc_tools.AbcError(f"Ortografía inconsistente para MIDI {pitch}: {letter}, alteración {alteration}.")
+    octave = numerator // 12 - 1
     if octave >= 5:
-        return text.lower() + "'" * (octave - 5)
-    return text + "," * (4 - octave)
+        return letter.lower() + "'" * (octave - 5)
+    return letter + "," * (4 - octave)
+
+
+def _pitch_text(pitch: int, key: str, local_accidentals: dict[str, int]) -> str:
+    """Serializa una altura usando la armadura y el estado accidental del compás."""
+    letter, alteration = _preferred_spelling(pitch, key)
+    signature = abc_tools._key_accidentals(key)
+    effective = local_accidentals.get(letter, signature[letter])
+    accidental = ""
+    if alteration != effective:
+        accidental = _ACCIDENTAL_TEXT[alteration]
+        local_accidentals[letter] = alteration
+    return accidental + _written_note(letter, pitch, alteration)
 
 
 def build_score(data: dict) -> dict:
@@ -226,6 +290,7 @@ def build_score(data: dict) -> dict:
             boundaries.update(t for t in chord_map if start <= t < end)
         boundaries = sorted(boundaries)
         parts: list[str] = []
+        local_accidentals: dict[str, int] = {}
         for a, b in zip(boundaries, boundaries[1:]):
             if name == "Vocal" and a in chord_map:
                 parts.append(f'"{chord_map[a]}"')
@@ -245,7 +310,7 @@ def build_score(data: dict) -> dict:
                     tied = note is not None and (
                         remaining > 0 or b < note["start"] + note["duration"]
                     )
-                    token = _pitch_text(note["pitch"]) if note else "z"
+                    token = _pitch_text(note["pitch"], key, local_accidentals) if note else "z"
                     parts.append(token + str(length) + ("-" if tied else ""))
             if remaining:
                 raise abc_tools.AbcError("No fue posible representar exactamente una duración del piano roll.")
