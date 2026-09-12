@@ -8,6 +8,7 @@ YuE2 Studio es un proyecto comunitario independiente que interopera con:
 - **abcjs** — cargado desde jsDelivr en tiempo de ejecución para mostrar partituras ABC en el navegador.
 - **PyTorch**, **Transformers**, **Hugging Face Hub** y dependencias relacionadas instaladas por el usuario.
 - Opcionalmente **Ollama** u otro endpoint local/remoto compatible con la API de OpenAI para Agent Edit.
+- **ComfyUI-FL-YuE2** de filliptm — proyecto Apache-2.0 utilizado como referencia técnica y de interacción para el diseño del piano roll de Studio 4. La implementación de YuE2 Studio se integra de forma independiente con su propio modelo ABC/eventos y con Gradio.
 
 Este repositorio no incluye pesos de YuE2 ni SheetSage2. Sus licencias y condiciones
 se mantienen separadas de la licencia Apache-2.0 de YuE2 Studio.

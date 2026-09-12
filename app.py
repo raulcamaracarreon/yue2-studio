@@ -20,6 +20,13 @@ import gradio as gr
 import torch
 from yue2 import YuE2Pipeline
 
+from tools import piano_roll_score
+from tools.piano_roll_ui import (
+    PIANOROLL_BRIDGE_CSS,
+    PIANOROLL_BRIDGE_JS,
+    build_piano_roll_editor,
+)
+
 
 APP_DIR = Path(__file__).resolve().parent
 
@@ -46,7 +53,7 @@ def _env_path(name, default):
 
 _load_env_file(APP_DIR / ".env")
 
-APP_VERSION = "3.3.4"
+APP_VERSION = "4.0.0"
 APP_NAME = f"YuE2 Studio v{APP_VERSION}"
 MODEL_ID = os.environ.get("YUE2_MODEL_ID", "m-a-p/YuE2-3B")
 VAE_ID = os.environ.get("YUE2_VAE_ID", "m-a-p/YuE2-Vae")
@@ -369,6 +376,49 @@ try {{
         f'src="data:text/html;base64,{encoded}" '
         'style="width:100%;height:720px;border:1px solid #d0d0d0;'
         'border-radius:8px;background:#fff;" loading="lazy"></iframe>'
+    )
+
+
+# ---------------------------------------------------------------------------
+# Studio 4 Score Workspace
+# ---------------------------------------------------------------------------
+EDIT_SCORE_WORKSPACE = "edit-score"
+
+
+def build_edit_score_workspace(abc_text):
+    """Renderiza Partitura + Piano Roll para el mismo estado ABC."""
+    return (
+        build_score_viewer(abc_text),
+        build_piano_roll_editor(
+            abc_text,
+            EDIT_SCORE_WORKSPACE,
+            interactive=True,
+        ),
+    )
+
+
+def apply_edit_piano_roll(payload_text):
+    """Reconstruye ABC desde el piano roll y refresca todo Edit Score."""
+    try:
+        payload = json.loads(payload_text or "")
+        result = piano_roll_score.build_score(payload)
+    except Exception as exc:
+        raise gr.Error(f"El Piano Roll no pudo convertirse a ABC válido: {exc}")
+
+    abc = result["abc"]
+    bpm, key, meter = extract_abc_controls(abc)
+    return (
+        abc,
+        build_score_viewer(abc),
+        build_piano_roll_editor(
+            abc,
+            EDIT_SCORE_WORKSPACE,
+            interactive=True,
+        ),
+        bpm,
+        key,
+        meter,
+        "✅ Piano Roll aplicado al ABC y validado.",
     )
 
 
@@ -2343,7 +2393,38 @@ def load_run_for_edit(label):
         key,
         meter,
         build_score_viewer(score),
+        build_piano_roll_editor(
+            score, EDIT_SCORE_WORKSPACE, interactive=True
+        ),
         f"Cargado para edición: `{run_dir}`",
+    )
+
+
+def load_abc_file_for_edit(upload_path):
+    """Carga y valida un ABC externo para usarlo como score editable."""
+    if not upload_path:
+        raise gr.Error("Selecciona o arrastra un archivo .abc/.txt.")
+
+    path = Path(upload_path)
+    try:
+        text = path.read_text(encoding="utf-8")
+        info = piano_roll_score.inspect_score(text)
+    except Exception as exc:
+        raise gr.Error(f"No se pudo cargar el ABC: {exc}")
+
+    abc = info["abc"]
+    bpm, key, meter = extract_abc_controls(abc)
+    return (
+        abc,
+        bpm,
+        key,
+        meter,
+        build_score_viewer(abc),
+        build_piano_roll_editor(
+            abc, EDIT_SCORE_WORKSPACE, interactive=True
+        ),
+        gr.update(value=None),
+        f"ABC externo cargado: `{path.name}`",
     )
 
 
@@ -2499,7 +2580,11 @@ initial_choices = library_choices()
 initial_a = initial_choices[0] if initial_choices else None
 initial_b = initial_choices[1] if len(initial_choices) > 1 else initial_a
 
-with gr.Blocks(title=APP_NAME, css=CSS) as demo:
+with gr.Blocks(
+    title=APP_NAME,
+    css=CSS + PIANOROLL_BRIDGE_CSS,
+    js=PIANOROLL_BRIDGE_JS,
+) as demo:
     gr.Markdown(f"# {APP_NAME}", elem_id="title")
     gr.Markdown(
         "Create · Transcribe · Cover · Agent Edit · Edit Score · Compare · Library · YuE2 + SheetSage2 local",
@@ -3484,10 +3569,21 @@ with gr.Blocks(title=APP_NAME, css=CSS) as demo:
                 label="Generación fuente",
                 scale=3,
             )
-            edit_load = gr.Button("Cargar", scale=1)
+            edit_load = gr.Button("Cargar biblioteca", scale=1)
             edit_refresh = gr.Button("↻ Actualizar", scale=1)
 
-        edit_load_status = gr.Markdown("Selecciona una generación y pulsa Cargar.")
+        with gr.Row():
+            edit_upload = gr.File(
+                label="Abrir score.abc",
+                type="filepath",
+                file_types=[".abc", ".txt"],
+                scale=3,
+            )
+            edit_upload_load = gr.Button("📄 Cargar ABC", scale=1)
+
+        edit_load_status = gr.Markdown(
+            "Carga una generación de la biblioteca o arrastra un archivo ABC."
+        )
 
         with gr.Row():
             with gr.Column(scale=3):
@@ -3498,10 +3594,6 @@ with gr.Blocks(title=APP_NAME, css=CSS) as demo:
                 edit_lyrics = gr.Textbox(
                     label="Lyrics",
                     lines=14,
-                )
-                edit_abc = gr.Textbox(
-                    label="ABC editable",
-                    lines=24,
                 )
 
             with gr.Column(scale=2):
@@ -3532,13 +3624,46 @@ with gr.Blocks(title=APP_NAME, css=CSS) as demo:
                     )
                     edit_randomize = gr.Button("🎲 Nueva seed")
 
-                edit_generate = gr.Button(
-                    "🎛️ REGENERATE FROM SCORE",
-                    variant="primary",
+        gr.Markdown("### Score Workspace")
+        with gr.Tabs():
+            with gr.Tab("🎼 Partitura"):
+                edit_input_visual = gr.HTML(
+                    value=build_score_viewer("")
+                )
+            with gr.Tab("🎹 Piano Roll"):
+                edit_piano_roll = gr.HTML(
+                    value=build_piano_roll_editor(
+                        "", EDIT_SCORE_WORKSPACE, interactive=True
+                    )
+                )
+            with gr.Tab("ABC"):
+                edit_abc = gr.Textbox(
+                    label="ABC editable",
+                    lines=24,
+                    interactive=True,
                 )
 
-        edit_input_visual = gr.HTML(
-            value=build_score_viewer("")
+        edit_workspace_status = gr.Markdown(
+            "Partitura, Piano Roll y ABC representan el mismo score. "
+            "En Piano Roll pulsa **Aplicar al ABC** para consolidar los cambios."
+        )
+
+        # Bridge oculto del iframe del piano roll hacia el callback Python.
+        edit_roll_payload = gr.Textbox(
+            value="",
+            elem_id=f"{EDIT_SCORE_WORKSPACE}-payload",
+            elem_classes=["yue2-pr-bridge-hidden"],
+            label="bridge payload",
+        )
+        edit_roll_apply = gr.Button(
+            "Aplicar bridge",
+            elem_id=f"{EDIT_SCORE_WORKSPACE}-apply",
+            elem_classes=["yue2-pr-bridge-hidden"],
+        )
+
+        edit_generate = gr.Button(
+            "🎛️ REGENERATE FROM SCORE",
+            variant="primary",
         )
 
         with gr.Row():
@@ -3583,14 +3708,46 @@ with gr.Blocks(title=APP_NAME, css=CSS) as demo:
                 edit_key,
                 edit_meter,
                 edit_input_visual,
+                edit_piano_roll,
                 edit_load_status,
             ],
         )
 
         edit_abc.change(
-            fn=build_score_viewer,
+            fn=build_edit_score_workspace,
             inputs=edit_abc,
-            outputs=edit_input_visual,
+            outputs=[edit_input_visual, edit_piano_roll],
+            queue=False,
+        )
+
+        edit_upload_load.click(
+            fn=load_abc_file_for_edit,
+            inputs=edit_upload,
+            outputs=[
+                edit_abc,
+                edit_bpm,
+                edit_key,
+                edit_meter,
+                edit_input_visual,
+                edit_piano_roll,
+                edit_source,
+                edit_load_status,
+            ],
+            queue=False,
+        )
+
+        edit_roll_apply.click(
+            fn=apply_edit_piano_roll,
+            inputs=edit_roll_payload,
+            outputs=[
+                edit_abc,
+                edit_input_visual,
+                edit_piano_roll,
+                edit_bpm,
+                edit_key,
+                edit_meter,
+                edit_workspace_status,
+            ],
             queue=False,
         )
 

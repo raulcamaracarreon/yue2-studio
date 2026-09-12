@@ -16,12 +16,25 @@ regenerar el audio con YuE2.
 - **Create** — letra/estilo → generación con YuE2, BPM, seed, CoT, compás verificado y control tonal simbólico.
 - **Transcribe** — audio → SheetSage2 → ABC, MIDI/eventos, PDF/SVG/PNG y preescucha de piano.
 - **Cover** — audio → transcripción → regeneración con YuE2 usando `cot="full"` o `cot="melody"`.
-- **Edit Score** — edición directa del ABC y regeneración a partir de la partitura revisada.
+- **Edit Score** — Score Workspace con Partitura, Piano Roll y ABC sincronizados, preescucha local y regeneración con YuE2.
 - **Agent Edit** — edición simbólica mediante lenguaje natural, con contratos de preservación y validación.
 - **Utilidades** — transposición, cambios de tempo, reharmonización determinista y operaciones sobre forma/secciones.
 - **Compare / Library** — comparación A/B y reapertura de generaciones anteriores.
 - **Trabajo local** — pensado para ejecutarse en una GPU NVIDIA local; el flujo principal no requiere un servicio en la nube.
 
+## Score Workspace y Piano Roll
+
+`Edit Score` concentra la edición musical manual en un único espacio de trabajo:
+
+- **Partitura** para lectura visual.
+- **Piano Roll** para mover, crear, borrar y redimensionar notas de Vocal e Ins.
+- **ABC** como representación simbólica editable y validable.
+- Preescucha local mediante Web Audio antes de regenerar con YuE2.
+- Carga directa de `score.abc` o apertura de una generación existente desde Library.
+
+Los cambios del Piano Roll se consolidan mediante **Aplicar al ABC**, que reconstruye y valida el score antes de actualizar las demás representaciones.
+
+El Piano Roll no se duplica en todas las pestañas: `Transcribe` mantiene su piano preview y las demás áreas envían el score a `Edit Score` cuando se requiere edición detallada.
 ## Control musical
 
 Con `cot="full"` y `cot="melody"`, YuE2 Studio obtiene primero el plan ABC y lo
@@ -117,7 +130,9 @@ Más información: **[docs/CONFIGURATION.md](docs/CONFIGURATION.md)**.
 ```text
 app.py                  Aplicación principal en Gradio
 launchers/              Lanzadores opcionales para WSL/Windows
-tools/abc_tools.py      Verificador estructural del dialecto ABC usado por YuE2 Studio
+tools/abc_tools.py       Verificador estructural del dialecto ABC usado por YuE2 Studio
+tools/piano_roll_score.py Conversión ABC ↔ eventos del Piano Roll
+tools/piano_roll_ui.py    Interfaz y reproducción del Piano Roll
 docs/                   Documentación de instalación y uso
 examples/               Ejemplo original de ABC
 screenshots/            Capturas públicas de la interfaz
