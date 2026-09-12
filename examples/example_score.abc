@@ -1,0 +1,13 @@
+X:1
+T:
+M:4/4
+L:1/8
+Q:1/4=100
+V: Vocal clef=treble name="Vocal Melody" snm="Vocal"
+V: Ins clef=treble name="Ins Melody" snm="Inst."
+K:C
+% Example phrase
+V: Vocal
+"C"C2 D2 E2 G2|
+V: Ins
+C,2 G,2 C2 E2|

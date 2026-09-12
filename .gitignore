@@ -1,0 +1,36 @@
+# Python
+__pycache__/
+*.py[cod]
+.venv/
+venv/
+.env
+
+# Local data / models / caches
+models/
+outputs/
+.cache/
+*.safetensors
+*.bin
+*.pt
+*.pth
+*.ckpt
+*.gguf
+
+# Generated media
+*.wav
+*.flac
+*.mp3
+*.ogg
+*.mp4
+
+# IDE / OS
+.vscode/
+.idea/
+.DS_Store
+Thumbs.db
+*:Zone.Identifier
+
+# Logs / temp
+*.log
+*.tmp
+.tmp_*

@@ -1,0 +1,4 @@
+# Install PyTorch/CUDA according to the YuE2 project first.
+yue2-infer==0.1.6
+gradio==5.44.0
+huggingface-hub==0.36.2
