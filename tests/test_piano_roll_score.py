@@ -49,6 +49,28 @@ class PianoRollScoreRoundTripTests(unittest.TestCase):
         self.assertEqual(self.rebuilt["roll"]["chords"], self.original["roll"]["chords"])
         self.assertEqual(self.rebuilt["roll"]["sections"], self.original["roll"]["sections"])
 
+    def test_key_aware_spelling_avoids_redundant_naturals(self):
+        abc = self.rebuilt["abc"]
+        self.assertNotIn("=D", abc)
+        self.assertNotIn("=F", abc)
+        self.assertNotIn("=A", abc)
+
+    def test_key_aware_spelling_uses_natural_only_when_needed(self):
+        data = inspect_score(SAMPLE)
+        data["roll"]["tracks"]["Vocal"] = [
+            {"start": 0, "duration": 256, "pitch": 62},   # D
+            {"start": 256, "duration": 256, "pitch": 65}, # F
+            {"start": 512, "duration": 256, "pitch": 69}, # A
+            {"start": 768, "duration": 256, "pitch": 70}, # Bb, from K:Dm
+            {"start": 1024, "duration": 256, "pitch": 71}, # B natural: explicit natural is required
+        ]
+        rebuilt = build_score(data)
+        self.assertIn("=B", rebuilt["abc"])
+        self.assertNotIn("=D", rebuilt["abc"])
+        self.assertNotIn("=F", rebuilt["abc"])
+        self.assertNotIn("=A", rebuilt["abc"])
+        self.assertEqual(rebuilt["roll"]["tracks"]["Vocal"], data["roll"]["tracks"]["Vocal"])
+
     def test_rejects_overlap(self):
         data = inspect_score(SAMPLE)
         data["roll"]["tracks"]["Vocal"].append({"start": 0, "duration": 128, "pitch": 72})
