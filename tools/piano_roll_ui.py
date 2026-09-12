@@ -134,6 +134,14 @@ svg {{ display:block; user-select:none; touch-action:none; }}
   <label>Zoom horizontal
     <input id="zoom" type="range" min="0.55" max="2.8" step="0.05" value="1">
   </label>
+  <label>Escucha
+    <select id="listen"><option value="both" selected>Ambas</option><option value="Vocal">Vocal</option><option value="Ins">Ins</option></select>
+  </label>
+  <button id="play" type="button">▶ Reproducir</button>
+  <button id="stop" type="button" disabled>■ Detener</button>
+  <label>Volumen
+    <input id="volume" type="range" min="0" max="1" step="0.02" value="0.28">
+  </label>
   <button id="undo" type="button">↶ Deshacer</button>
   <button id="redo" type="button">↷ Rehacer</button>
   <button id="delete" type="button">Borrar selección</button>
@@ -143,7 +151,7 @@ svg {{ display:block; user-select:none; touch-action:none; }}
 </div>
 <div id="status" class="status">Listo.</div>
 <div id="roll" class="roll-wrap"></div>
-<div class="help">Clic en espacio vacío: crea una nota · arrastrar nota: mover · arrastrar borde derecho: duración · Shift+clic: selección múltiple · Supr: borrar · Ctrl/Cmd+Z: deshacer · Ctrl/Cmd+Shift+Z: rehacer.</div>
+<div class="help">Clic en nota: escuchar · clic en espacio vacío: crea una nota · arrastrar nota: mover y escuchar la nueva altura · arrastrar borde derecho: duración · Shift+clic: selección múltiple · Reproducir inicia desde la nota seleccionada o desde el borde izquierdo visible · Supr: borrar · Ctrl/Cmd+Z: deshacer.</div>
 <script>
 (() => {{
   const WORKSPACE = {workspace};
@@ -174,6 +182,20 @@ svg {{ display:block; user-select:none; touch-action:none; }}
   const deleteEl = document.getElementById("delete");
   const undoEl = document.getElementById("undo");
   const redoEl = document.getElementById("redo");
+  const listenEl = document.getElementById("listen");
+  const playEl = document.getElementById("play");
+  const stopEl = document.getElementById("stop");
+  const volumeEl = document.getElementById("volume");
+  let audioCtx = null;
+  let masterGain = null;
+  let scheduledNodes = [];
+  let playbackFrame = 0;
+  let playStartTick = 0;
+  let playStartContextTime = 0;
+  let playbackSecondsPerTick = 0;
+  let playheadEl = null;
+  let playheadLayout = null;
+  let lastAuditionPitch = null;
 
   if (!INTERACTIVE) {{
     applyEl.style.display = "none";
@@ -217,6 +239,121 @@ svg {{ display:block; user-select:none; touch-action:none; }}
     return "";
   }}
   function updateButtons() {{ undoEl.disabled=!history.length||!INTERACTIVE; redoEl.disabled=!future.length||!INTERACTIVE; deleteEl.disabled=!selected.size||!INTERACTIVE; }}
+
+  async function ensureAudio() {{
+    if (!audioCtx) {{
+      audioCtx = new (window.AudioContext || window.webkitAudioContext)();
+      masterGain = audioCtx.createGain();
+      masterGain.gain.value = Number(volumeEl.value);
+      masterGain.connect(audioCtx.destination);
+    }}
+    if (audioCtx.state === "suspended") await audioCtx.resume();
+    masterGain.gain.value = Number(volumeEl.value);
+    return audioCtx;
+  }}
+
+  function frequencyForMidi(pitch) {{ return 440 * Math.pow(2, (pitch - 69) / 12); }}
+
+  function scheduleTone(pitch, startTime, duration, track, gainScale=1) {{
+    if (!audioCtx || !masterGain) return null;
+    const osc = audioCtx.createOscillator();
+    const gain = audioCtx.createGain();
+    osc.type = track === "Vocal" ? "sine" : "triangle";
+    osc.frequency.setValueAtTime(frequencyForMidi(pitch), startTime);
+    const peak = Math.max(0.0001, Number(volumeEl.value) * gainScale * (track === "Vocal" ? 0.42 : 0.34));
+    const endTime = startTime + Math.max(0.05, duration);
+    const attackEnd = Math.min(startTime + 0.018, endTime - 0.01);
+    gain.gain.setValueAtTime(0.0001, startTime);
+    gain.gain.exponentialRampToValueAtTime(peak, Math.max(startTime + 0.001, attackEnd));
+    gain.gain.setValueAtTime(peak, Math.max(startTime + 0.001, endTime - 0.045));
+    gain.gain.exponentialRampToValueAtTime(0.0001, endTime);
+    osc.connect(gain); gain.connect(masterGain);
+    osc.start(startTime); osc.stop(endTime + 0.02);
+    scheduledNodes.push(osc);
+    return osc;
+  }}
+
+  async function audition(pitch, track) {{
+    await ensureAudio();
+    const now = audioCtx.currentTime + 0.005;
+    scheduleTone(pitch, now, 0.28, track, 0.85);
+  }}
+
+  function clearScheduledNodes() {{
+    for (const node of scheduledNodes) {{ try {{ node.stop(); }} catch (_) {{}} }}
+    scheduledNodes = [];
+  }}
+
+  function hidePlayhead() {{
+    if (playheadEl) playheadEl.setAttribute("visibility", "hidden");
+  }}
+
+  function updatePlayhead(tick) {{
+    if (!playheadEl || !playheadLayout) return;
+    const x = KEY_W + tick / playheadLayout.ppq * playheadLayout.pxBeat;
+    playheadEl.setAttribute("x1", x); playheadEl.setAttribute("x2", x);
+    playheadEl.setAttribute("visibility", "visible");
+    const left = rollEl.scrollLeft, right = left + rollEl.clientWidth;
+    if (x > right - 80) rollEl.scrollLeft = Math.max(0, x - rollEl.clientWidth * 0.25);
+  }}
+
+  function stopPlayback(message="Reproducción detenida.") {{
+    if (playbackFrame) cancelAnimationFrame(playbackFrame);
+    playbackFrame = 0;
+    clearScheduledNodes();
+    hidePlayhead();
+    playEl.disabled = false;
+    stopEl.disabled = true;
+    if (message) setStatus(message);
+  }}
+
+  function playbackStartTick() {{
+    if (selected.size) {{
+      const first = [...selected][0];
+      const [track,index] = parseId(first);
+      const note = score.roll.tracks[track]?.[index];
+      if (note) return note.start;
+    }}
+    const ppq = score.roll.ppq || 256;
+    const pxBeat = BASE_PX_PER_BEAT * zoom;
+    return clamp(Math.round(Math.max(0, rollEl.scrollLeft - KEY_W) / pxBeat * ppq), 0, score.roll.total_ticks);
+  }}
+
+  async function playScore() {{
+    stopPlayback("");
+    await ensureAudio();
+    const ppq = score.roll.ppq || 256;
+    const startTick = playbackStartTick();
+    if (startTick >= score.roll.total_ticks) {{ setStatus("El cursor está al final del score.", true); return; }}
+    const secondsPerTick = 60 / Number(score.bpm || 90) / ppq;
+    const tracks = listenEl.value === "both" ? ["Vocal","Ins"] : [listenEl.value];
+    const contextStart = audioCtx.currentTime + 0.07;
+    for (const track of tracks) {{
+      for (const note of score.roll.tracks[track] || []) {{
+        const noteEnd = note.start + note.duration;
+        if (noteEnd <= startTick) continue;
+        const clippedStart = Math.max(note.start, startTick);
+        const clippedDuration = Math.max(1, noteEnd - clippedStart);
+        const startTime = contextStart + (clippedStart - startTick) * secondsPerTick;
+        scheduleTone(note.pitch, startTime, clippedDuration * secondsPerTick, track, 1);
+      }}
+    }}
+    playStartTick = startTick;
+    playStartContextTime = contextStart;
+    playbackSecondsPerTick = secondsPerTick;
+    playEl.disabled = true; stopEl.disabled = false;
+    updatePlayhead(startTick);
+    setStatus(`Reproduciendo desde ${{(startTick/ppq).toFixed(2)}} negras · ${{score.bpm}} BPM · ${{listenEl.options[listenEl.selectedIndex].text}}.`);
+    const animate = () => {{
+      if (!audioCtx || stopEl.disabled) return;
+      const elapsed = Math.max(0, audioCtx.currentTime - playStartContextTime);
+      const tick = playStartTick + elapsed / playbackSecondsPerTick;
+      if (tick >= score.roll.total_ticks) {{ stopPlayback("Reproducción terminada."); return; }}
+      updatePlayhead(tick);
+      playbackFrame = requestAnimationFrame(animate);
+    }};
+    playbackFrame = requestAnimationFrame(animate);
+  }}
 
   function draw() {{
     const keepLeft=rollEl.scrollLeft, keepTop=rollEl.scrollTop;
@@ -270,6 +407,8 @@ svg {{ display:block; user-select:none; touch-action:none; }}
         if (w>=10 && INTERACTIVE) shape("rect",{{x:x+w-5,y:y+2,width:4,height:ROW-6,fill:"#fff",opacity:.75,"data-track":track,"data-index":index,"data-resize":"1",cursor:"ew-resize"}});
       }});
     }}
+    playheadLayout = {{ppq, pxBeat, height}};
+    playheadEl = shape("line",{{x1:KEY_W,x2:KEY_W,y1:0,y2:height,stroke:"#ffcf5a","stroke-width":2,"pointer-events":"none",visibility:"hidden"}});
 
     function point(ev) {{
       const r = rollEl.getBoundingClientRect();
@@ -278,7 +417,6 @@ svg {{ display:block; user-select:none; touch-action:none; }}
         y: ev.clientY - r.top + rollEl.scrollTop
       }};
     }}
-    
     function pitchAt(y) {{ return clamp(high-Math.floor((y-(TOP+CHORD_H))/ROW),0,127); }}
     function tickAt(x) {{ return clamp(q((x-KEY_W)/pxBeat*ppq),0,total); }}
 
@@ -301,6 +439,9 @@ svg {{ display:block; user-select:none; touch-action:none; }}
         }}
         if (!selected.has(id)) selected=new Set([id]);
         activeTrack=track; trackEl.value=track;
+        const clickedNote=score.roll.tracks[track][index];
+        lastAuditionPitch=clickedNote.pitch;
+        audition(clickedNote.pitch, track);
         const originals=new Map([...selected].map(sel=>{{ const [tr,ix]=parseId(sel); return [sel,structuredClone(score.roll.tracks[tr][ix])]; }}));
         const startP=p0;
         let changed=false;
@@ -318,6 +459,8 @@ svg {{ display:block; user-select:none; touch-action:none; }}
               n.start=clamp(old.start+dx,0,total-old.duration);
               n.pitch=clamp(old.pitch+dy,0,127);
             }}
+            const movedPitch=score.roll.tracks[track][index].pitch;
+            if (movedPitch !== lastAuditionPitch) {{ lastAuditionPitch=movedPitch; audition(movedPitch, track); }}
             changed=true;
           }}
           draw();
@@ -339,6 +482,7 @@ svg {{ display:block; user-select:none; touch-action:none; }}
       score.roll.tracks[activeTrack].sort((a,b)=>a.start-b.start||a.pitch-b.pitch);
       history.push(before); if(history.length>80)history.shift(); future=[];
       const ix=score.roll.tracks[activeTrack].indexOf(note); selected=new Set([noteId(activeTrack,ix)]);
+      audition(note.pitch, activeTrack);
       const err=validateLocal(); setStatus(err||"Nota creada.",!!err); draw();
     }};
 
@@ -358,9 +502,12 @@ svg {{ display:block; user-select:none; touch-action:none; }}
   trackEl.onchange=()=>{{activeTrack=trackEl.value; draw();}};
   snapEl.onchange=()=>{{snap=Number(snapEl.value); draw();}};
   zoomEl.oninput=()=>{{zoom=Number(zoomEl.value); draw();}};
-  undoEl.onclick=undo; redoEl.onclick=redo; deleteEl.onclick=deleteSelected;
+  undoEl.onclick=()=>{{stopPlayback("");undo();}}; redoEl.onclick=()=>{{stopPlayback("");redo();}}; deleteEl.onclick=()=>{{stopPlayback("");deleteSelected();}};
+  playEl.onclick=playScore; stopEl.onclick=()=>stopPlayback();
+  volumeEl.oninput=()=>{{ if(masterGain) masterGain.gain.value=Number(volumeEl.value); }};
   document.getElementById("fit").onclick=()=>{{fitPitchRange(); draw();}};
   applyEl.onclick=()=>{{
+    stopPlayback("");
     const err=validateLocal();
     if(err){{setStatus(err,true);return;}}
     window.parent.postMessage({{type:"yue2-pianoroll-apply",workspace:WORKSPACE,payload:score}},"*");
