@@ -30,19 +30,74 @@ def main() -> None:
 
     text = replace_once(
         text,
-        "import gradio as gr\nimport torch\nfrom yue2 import YuE2Pipeline\n",
-        "import gradio as gr\nimport torch\nfrom yue2 import YuE2Pipeline\n\n"
-        "from tools import piano_roll_score\n"
-        "from tools.piano_roll_ui import (\n"
-        "    PIANOROLL_BRIDGE_CSS,\n"
-        "    PIANOROLL_BRIDGE_JS,\n"
-        "    build_piano_roll_editor,\n"
-        ")\n",
+        """import gradio as gr
+import torch
+from yue2 import YuE2Pipeline
+""",
+        """import gradio as gr
+import torch
+from yue2 import YuE2Pipeline
+
+from tools import piano_roll_score
+from tools.piano_roll_ui import (
+    PIANOROLL_BRIDGE_CSS,
+    PIANOROLL_BRIDGE_JS,
+    build_piano_roll_editor,
+)
+""",
         "imports del piano roll",
     )
 
-    helper_anchor = """\n\n# ---------------------------------------------------------------------------\n# Output library\n# ---------------------------------------------------------------------------\n"""
-    helper_code = r'''\n\n# ---------------------------------------------------------------------------\n# Studio 4 Score Workspace\n# ---------------------------------------------------------------------------\nEDIT_SCORE_WORKSPACE = "edit-score"\n\n\ndef build_edit_score_workspace(abc_text):\n    """Renderiza Partitura + Piano Roll para el mismo estado ABC."""\n    return (\n        build_score_viewer(abc_text),\n        build_piano_roll_editor(\n            abc_text,\n            EDIT_SCORE_WORKSPACE,\n            interactive=True,\n        ),\n    )\n\n\ndef apply_edit_piano_roll(payload_text):\n    """Reconstruye ABC desde el piano roll y refresca todo Edit Score."""\n    try:\n        payload = json.loads(payload_text or "")\n        result = piano_roll_score.build_score(payload)\n    except Exception as exc:\n        raise gr.Error(f"El Piano Roll no pudo convertirse a ABC válido: {exc}")\n\n    abc = result["abc"]\n    bpm, key, meter = extract_abc_controls(abc)\n    return (\n        abc,\n        build_score_viewer(abc),\n        build_piano_roll_editor(\n            abc,\n            EDIT_SCORE_WORKSPACE,\n            interactive=True,\n        ),\n        bpm,\n        key,\n        meter,\n        "✅ Piano Roll aplicado al ABC y validado.",\n    )\n'''
+    helper_anchor = """
+
+# ---------------------------------------------------------------------------
+# Output library
+# ---------------------------------------------------------------------------
+"""
+    helper_code = '''
+
+# ---------------------------------------------------------------------------
+# Studio 4 Score Workspace
+# ---------------------------------------------------------------------------
+EDIT_SCORE_WORKSPACE = "edit-score"
+
+
+def build_edit_score_workspace(abc_text):
+    """Renderiza Partitura + Piano Roll para el mismo estado ABC."""
+    return (
+        build_score_viewer(abc_text),
+        build_piano_roll_editor(
+            abc_text,
+            EDIT_SCORE_WORKSPACE,
+            interactive=True,
+        ),
+    )
+
+
+def apply_edit_piano_roll(payload_text):
+    """Reconstruye ABC desde el piano roll y refresca todo Edit Score."""
+    try:
+        payload = json.loads(payload_text or "")
+        result = piano_roll_score.build_score(payload)
+    except Exception as exc:
+        raise gr.Error(f"El Piano Roll no pudo convertirse a ABC válido: {exc}")
+
+    abc = result["abc"]
+    bpm, key, meter = extract_abc_controls(abc)
+    return (
+        abc,
+        build_score_viewer(abc),
+        build_piano_roll_editor(
+            abc,
+            EDIT_SCORE_WORKSPACE,
+            interactive=True,
+        ),
+        bpm,
+        key,
+        meter,
+        "✅ Piano Roll aplicado al ABC y validado.",
+    )
+'''
     text = replace_once(
         text,
         helper_anchor,
@@ -50,8 +105,15 @@ def main() -> None:
         "helpers del Score Workspace",
     )
 
-    load_old = """        build_score_viewer(score),\n        f\"Cargado para edición: `{run_dir}`\",\n"""
-    load_new = """        build_score_viewer(score),\n        build_piano_roll_editor(\n            score, EDIT_SCORE_WORKSPACE, interactive=True\n        ),\n        f\"Cargado para edición: `{run_dir}`\",\n"""
+    load_old = """        build_score_viewer(score),
+        f"Cargado para edición: `{run_dir}`",
+"""
+    load_new = """        build_score_viewer(score),
+        build_piano_roll_editor(
+            score, EDIT_SCORE_WORKSPACE, interactive=True
+        ),
+        f"Cargado para edición: `{run_dir}`",
+"""
     text = replace_once(
         text,
         load_old,
@@ -62,22 +124,28 @@ def main() -> None:
     text = replace_once(
         text,
         "with gr.Blocks(title=APP_NAME, css=CSS) as demo:",
-        "with gr.Blocks(\n"
-        "    title=APP_NAME,\n"
-        "    css=CSS + PIANOROLL_BRIDGE_CSS,\n"
-        "    js=PIANOROLL_BRIDGE_JS,\n"
-        ") as demo:",
+        """with gr.Blocks(
+    title=APP_NAME,
+    css=CSS + PIANOROLL_BRIDGE_CSS,
+    js=PIANOROLL_BRIDGE_JS,
+) as demo:""",
         "bridge global de Gradio",
     )
 
-    start_marker = """    # ------------------------------------------------------------------\n    # EDIT SCORE\n    # ------------------------------------------------------------------\n"""
-    end_marker = """    # ------------------------------------------------------------------\n    # COMPARE\n    # ------------------------------------------------------------------\n"""
+    start_marker = """    # ------------------------------------------------------------------
+    # EDIT SCORE
+    # ------------------------------------------------------------------
+"""
+    end_marker = """    # ------------------------------------------------------------------
+    # COMPARE
+    # ------------------------------------------------------------------
+"""
     start = text.find(start_marker)
     end = text.find(end_marker, start + len(start_marker))
     if start < 0 or end < 0:
         raise RuntimeError("No se encontró el bloque completo de Edit Score.")
 
-    edit_block = r'''    # ------------------------------------------------------------------
+    edit_block = '''    # ------------------------------------------------------------------
     # EDIT SCORE
     # ------------------------------------------------------------------
     with gr.Tab("✏️ Edit Score"):
