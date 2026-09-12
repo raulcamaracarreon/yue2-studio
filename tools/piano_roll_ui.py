@@ -271,7 +271,14 @@ svg {{ display:block; user-select:none; touch-action:none; }}
       }});
     }}
 
-    function point(ev) {{ const r=svg.getBoundingClientRect(); return {{x:(ev.clientX-r.left)*width/r.width,y:(ev.clientY-r.top)*height/r.height}}; }}
+    function point(ev) {{
+      const r = rollEl.getBoundingClientRect();
+      return {{
+        x: ev.clientX - r.left + rollEl.scrollLeft,
+        y: ev.clientY - r.top + rollEl.scrollTop
+      }};
+    }}
+    
     function pitchAt(y) {{ return clamp(high-Math.floor((y-(TOP+CHORD_H))/ROW),0,127); }}
     function tickAt(x) {{ return clamp(q((x-KEY_W)/pxBeat*ppq),0,total); }}
 
